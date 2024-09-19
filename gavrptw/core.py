@@ -1,14 +1,20 @@
 # -*- coding: utf-8 -*-
 
 '''gavrptw/core.py'''
-
+'''Alteração com implementação de mutação gaussiana/Gaussian Mutation'''
+'''Matheus Romero Rodrigues Marinho, UFRPE-2024'''
 import os
+import sys
 import io
 import random
 from csv import DictWriter
+import math
 from deap import base, creator, tools
 from . import BASE_DIR
 from .utils import make_dirs_for_file, exist, load_instance, merge_rules
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from gavrptw import BASE_DIR  # Importação absoluta
+from gavrptw.utils import make_dirs_for_file, exist, load_instance, merge_rules  # Importação absoluta
 
 
 def ind2route(individual, instance):
@@ -23,10 +29,15 @@ def ind2route(individual, instance):
     last_customer_id = 0
     for customer_id in individual:
         # Update vehicle load
-        demand = instance[f'customer_{customer_id}']['demand']
+        if customer_id == 0:
+            continue  # Skip the depot
+        customer_key = f'customer_{customer_id}'
+        if customer_key not in instance:
+            raise KeyError(f"Customer ID {customer_id} not found in instance")
+        demand = instance[customer_key]['demand']
         updated_vehicle_load = vehicle_load + demand
         # Update elapsed time
-        service_time = instance[f'customer_{customer_id}']['service_time']
+        service_time = instance[customer_key]['service_time']
         return_time = instance['distance_matrix'][customer_id][0]
         updated_elapsed_time = elapsed_time + \
             instance['distance_matrix'][last_customer_id][customer_id] + service_time + return_time
@@ -81,19 +92,24 @@ def eval_vrptw(individual, instance, unit_cost=1.0, init_cost=0, wait_cost=0, de
         elapsed_time = 0
         last_customer_id = 0
         for customer_id in sub_route:
+            if customer_id == 0:
+                continue  # Skip the depot
             # Calculate section distance
             distance = instance['distance_matrix'][last_customer_id][customer_id]
             # Update sub-route distance
             sub_route_distance = sub_route_distance + distance
             # Calculate time cost
+            customer_key = f'customer_{customer_id}'
+            if customer_key not in instance:
+                raise KeyError(f"Customer ID {customer_id} not found in instance")
             arrival_time = elapsed_time + distance
-            time_cost = wait_cost * max(instance[f'customer_{customer_id}']['ready_time'] - \
+            time_cost = wait_cost * max(instance[customer_key]['ready_time'] - \
                 arrival_time, 0) + delay_cost * max(arrival_time - \
-                instance[f'customer_{customer_id}']['due_time'], 0)
+                instance[customer_key]['due_time'], 0)
             # Update sub-route time cost
             sub_route_time_cost = sub_route_time_cost + time_cost
             # Update elapsed time
-            elapsed_time = arrival_time + instance[f'customer_{customer_id}']['service_time']
+            elapsed_time = arrival_time + instance[customer_key]['service_time']
             # Update last customer ID
             last_customer_id = customer_id
         # Calculate transport cost
@@ -118,10 +134,10 @@ def cx_partially_matched(ind1, ind2):
         rule1to2, is_fully_merged = merge_rules(rules=rule1to2)
     rule2to1 = {rule[1]: rule[0] for rule in rule1to2}
     rule1to2 = dict(rule1to2)
-    ind1 = [gene if gene not in part2 else rule2to1[gene] for gene in ind1[:cxpoint1]] + part2 + \
-        [gene if gene not in part2 else rule2to1[gene] for gene in ind1[cxpoint2+1:]]
-    ind2 = [gene if gene not in part1 else rule1to2[gene] for gene in ind2[:cxpoint1]] + part1 + \
-        [gene if gene not in part1 else rule1to2[gene] for gene in ind2[cxpoint2+1:]]
+    ind1 = [gene if gene not in part2 else rule2to1.get(gene, gene) for gene in ind1[:cxpoint1]] + part2 + \
+        [gene if gene not in part2 else rule2to1.get(gene, gene) for gene in ind1[cxpoint2+1:]]
+    ind2 = [gene if gene not in part1 else rule1to2.get(gene, gene) for gene in ind2[:cxpoint1]] + part1 + \
+        [gene if gene not in part1 else rule1to2.get(gene, gene) for gene in ind2[cxpoint2+1:]]
     return ind1, ind2
 
 
@@ -134,6 +150,31 @@ def mut_inverse_indexes(individual):
     return (individual, )
 
 
+def mut_swap(individual):
+    '''Mutação Swap: Troca dois genes aleatórios no indivíduo'''
+    idx1, idx2 = random.sample(range(len(individual)), 2)
+    individual[idx1], individual[idx2] = individual[idx2], individual[idx1]
+    return individual,
+
+
+def mut_gaussian(individual, indpb):
+    '''Mutação Gaussiana: Aplica uma mutação baseada em uma distribuição gaussiana'''
+    if random.random() < indpb:
+        idx1 = random.choice(range(len(individual)))
+        idx2 = random.gauss(idx1, 1)
+        if idx2 < idx1:
+            idx2 = math.floor(idx2)
+        else:
+            idx2 = math.ceil(idx2)
+        if idx2 < 0:
+            idx2 = 0
+        elif idx2 >= len(individual):
+            idx2 = len(individual) - 1 
+
+        individual[idx1], individual[idx2] = individual[idx2], individual[idx1]      
+        return individual
+
+
 def run_gavrptw(instance_name, unit_cost, init_cost, wait_cost, delay_cost, ind_size, pop_size, \
     cx_pb, mut_pb, n_gen, export_csv=False, customize_data=False):
     '''gavrptw.core.run_gavrptw(instance_name, unit_cost, init_cost, wait_cost, delay_cost,
@@ -143,6 +184,8 @@ def run_gavrptw(instance_name, unit_cost, init_cost, wait_cost, delay_cost, ind_
     else:
         json_data_dir = os.path.join(BASE_DIR, 'data', 'json')
     json_file = os.path.join(json_data_dir, f'{instance_name}.json')
+    if not os.path.exists(json_file):
+        raise FileNotFoundError(f"Path: {json_file} does not exist")
     instance = load_instance(json_file=json_file)
     if instance is None:
         return
@@ -159,7 +202,7 @@ def run_gavrptw(instance_name, unit_cost, init_cost, wait_cost, delay_cost, ind_
         init_cost=init_cost, wait_cost=wait_cost, delay_cost=delay_cost)
     toolbox.register('select', tools.selRoulette)
     toolbox.register('mate', cx_partially_matched)
-    toolbox.register('mutate', mut_inverse_indexes)
+    toolbox.register('mutate', mut_swap)
     pop = toolbox.population(n=pop_size)
     # Results holders for exporting results to CSV file
     csv_data = []
@@ -185,6 +228,11 @@ def run_gavrptw(instance_name, unit_cost, init_cost, wait_cost, delay_cost, ind_
         for mutant in offspring:
             if random.random() < mut_pb:
                 toolbox.mutate(mutant)
+                del mutant.fitness.values
+        # Apply Gaussian mutation from the second mutation onwards
+        for mutant in offspring:
+            if random.random() < mut_pb:
+                mut_gaussian(mutant,indpb=0.45)
                 del mutant.fitness.values
         # Evaluate the individuals with an invalid fitness
         invalid_ind = [ind for ind in offspring if not ind.fitness.valid]

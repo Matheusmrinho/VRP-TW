@@ -4,6 +4,7 @@
 
 import random
 from gavrptw.core import run_gavrptw
+from deap import tools
 
 
 def main():
@@ -24,6 +25,9 @@ def main():
     n_gen = 300
 
     export_csv = True
+
+    # Alterar operadores de seleção, cruzamento e mutação
+
 
     run_gavrptw(instance_name=instance_name, unit_cost=unit_cost, init_cost=init_cost, \
         wait_cost=wait_cost, delay_cost=delay_cost, ind_size=ind_size, pop_size=pop_size, \

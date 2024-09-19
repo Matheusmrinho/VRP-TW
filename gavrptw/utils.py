@@ -55,19 +55,22 @@ def load_instance(json_file):
 
 
 def merge_rules(rules):
-    '''gavrptw.uitls.merge_rules(rules)'''
+    '''gavrptw.utils.merge_rules(rules)'''
     is_fully_merged = True
     for round1 in rules:
-        if round1[0] == round1[1]:
-            rules.remove(round1)
-            is_fully_merged = False
-        else:
-            for round2 in rules:
-                if round2[0] == round1[1]:
-                    rules.append((round1[0], round2[1]))
-                    rules.remove(round1)
-                    rules.remove(round2)
+        for round2 in rules:
+            if round1 != round2 and round1[1] == round2[0]:
+                new_rule = (round1[0], round2[1])
+                if new_rule not in rules:
+                    rules.append(new_rule)
                     is_fully_merged = False
+                if round1 in rules:
+                    rules.remove(round1)
+                if round2 in rules:
+                    rules.remove(round2)
+                break
+        if not is_fully_merged:
+            break
     return rules, is_fully_merged
 
 
